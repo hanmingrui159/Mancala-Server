@@ -2,7 +2,7 @@
 A server used to play the customized multiple-player version of the Mancala game through TCP sockets
 
 SET-UP:
-To compile the game, open the bash terminal, cd into the directory containing Makefile and mancsrv.c, and enter "make" on the command line
+To compile the game, open the bash terminal, cd into the directory containing Makefile and mancsrv.c, and enter "make" on the command line <br /> \n
 To play the game, run the server ./mancsrv in one terminal window, and each player uses the command "nc 127.0.0.1 3000" in a new bash window to connect to the server. 
 
 RULES:
