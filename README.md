@@ -1,5 +1,5 @@
 # Mancala-Server
-A server used to play the customized multiple-player version of the Mancala game through TCP sockets
+A server used to play the customized multiple-player version of the Mancala game through TCP sockets for CSC209 Winter 2018
 
 SET-UP:<br />
 -To compile the game, open the bash terminal, cd into the directory containing Makefile and mancsrv.c, and enter "make" on the command line <br />
