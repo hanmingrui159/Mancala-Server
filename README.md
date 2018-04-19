@@ -2,8 +2,8 @@
 A server used to play the customized multiple-player version of the Mancala game through TCP sockets
 
 SET-UP:<br />
-To compile the game, open the bash terminal, cd into the directory containing Makefile and mancsrv.c, and enter "make" on the command line <br />
-To play the game, run the server ./mancsrv in one terminal window, and each player uses the command "nc 127.0.0.1 3000" in a new bash window to connect to the server. <br />
+-To compile the game, open the bash terminal, cd into the directory containing Makefile and mancsrv.c, and enter "make" on the command line <br />
+-To play the game, run the server ./mancsrv in one terminal window, and each player uses the command "nc 127.0.0.1 3000" in a new bash window to connect to the server. <br />
 
 RULES:<br />
 -Newly Connected players need to enter the player's name first to be added to the game<br />
@@ -14,5 +14,5 @@ RULES:<br />
 
 The board is displayed in the format<br />
   mwc:  [0]5 [1]1 [2]6 [3]7 [4]6 [5]5  [end pit]0<br />
-  jpc:  [0]4 [1]4 [2]0 [3]5 [4]5 [5]0  [end pit]2<br />
+   jpc:  [0]4 [1]4 [2]0 [3]5 [4]5 [5]0  [end pit]2<br />
 That is, one user per line, saying the number of pebbles in each pit (e.g., mwc's are 5, 1, 6, 7, 6, and 5, respectively), and identifying the pits by index numbers (starting from zero) for the use of players in making their moves.
