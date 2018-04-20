@@ -17,17 +17,17 @@ int port = 3000;
 int listenfd;
 
 struct player {
-    int fd;
+    int fd;//file descriptor used to communicate with the player 
     char name[MAXNAME];
     int pits[NPITS+1];  // pits[0..NPITS-1] are the regular pits 
                         // pits[NPITS] is the end pit
     char read_buf[MAXNAME + 2];
-    int inbuf;// for read_buf in obtain_name
-    int room; // for read_buf in obtain_name
-    //other stuff undoubtedly needed here
-    int hasname;
-    struct player *next;
-    int read_buf_overflowed;
+    int inbuf;// for read_buf in obtain_name, to keep track of bytes currently stored in read_buf
+    int room; // for read_buf in obtain_name, to keep track of how many more bytes can be read into read_buf
+	
+    int hasname;//flag to indicate if a player has entered a valid name, a player joins the game when he has entered a valid name
+    struct player *next;//the next player in the linked list
+    int read_buf_overflowed;//check if previous read resulted in a buffer overflow
 };
 struct player *playerlist = NULL;
 struct player *current_player = NULL;
@@ -54,7 +54,7 @@ int main(int argc, char **argv) {
     char msg[MAXMESSAGE];
     
     //set up
-    parseargs(argc, argv); // for the optional -p hasname to listen on specific port
+    parseargs(argc, argv); // for the optional -p flag to listen on specific port
     makelistener(); // set up front-desk socket
     
     //set up all_fds
@@ -63,15 +63,14 @@ int main(int argc, char **argv) {
     FD_ZERO(&all_fds);
     FD_SET(listenfd, &all_fds);
     fd_set listen_fds = all_fds;
-    //each loop finishes when a current player entered a valid move
+	
     while (!game_is_over()) {
-        //case 1: game hasn't started yet, we don't have any current player in the game
+        //case 1: game hasn't started yet, no players in the game, so keep iterating until the first player enters a valid name and joins
         while (current_player == NULL){
-            //turn the hasname off so we can only proceed to the next player when the current player has completed his round, in which case the hasname will be set on
-            //make a copy of all_fds
+            //do a select() call to see which fd has received input
             listen_fds = all_fds;
             fflush(stdout);
-            //do a select() on listen_fds
+		
             int nready = select(max_fd + 1, &listen_fds, NULL, NULL, NULL);
             if (nready == -1) {
                 perror("server: select");
@@ -81,30 +80,29 @@ int main(int argc, char **argv) {
             //check if a new connection is ready
             if (FD_ISSET(listenfd, &listen_fds)) {
                 printf("a new connection is being accepted\n");
+		    
                 struct player *new_player = accept_connection(listenfd);
-                
                 FD_SET(new_player->fd, &all_fds);
                 //update max_fd for next select() call
                 if (new_player->fd > max_fd){
                     max_fd = new_player->fd;
                 }
-                //update playerlist if it is not established yet
+                //update playerlist that has a linked-list structure
                 new_player->next = playerlist;
                 playerlist = new_player;
             }
             fflush(stdout);
-            //after select and checking for new connections, try to obtain name for unnamed potential players and warn in-game players not in their turn
+            //after select() and checking for new connections, try to obtain name for unnamed players
             for (struct player *p = playerlist; p; p = p->next) {
-                //this player is unamed/not in the game && the player inputted something
+                //if this player is unamed/not in the game && the player has entered input
                 if (p->hasname==0 &&FD_ISSET(p->fd, &listen_fds)){
                     int obtain_result = obtain_name(p); // attempt to obtain a valid name for player p
                     
                     if (obtain_result == 2){//the input is not yet complete
-                        //CHECK FOR CORNER CASE
                         printf("user entered an incomplete buffer\n");
-                        //we do nothing as next few rounds there should be enough string to complete this parsed input
+                        //next obtain_name() might result in a complete buffer, so wait for the next round of input
                     }
-                    else if (obtain_result == 1){//the input is a valid name and p's name is set accordingly
+                    else if (obtain_result == 1){//the input is complete and player p has entered a valid name
                         printf("the input is a valid name and %s's name is set accordingly\n", p->name);
                         
                         if (current_player==NULL){
@@ -113,14 +111,14 @@ int main(int argc, char **argv) {
                         broadcast("we have a new player!\r\n");
                         printf("new player %s has finished typing his name\n", p->name);
                     }
-                    else if (obtain_result == 0){//a player has disconnected
+                    else if (obtain_result == 0){//player p has disconnected
                         //restructure the linked list
                         update_list(p, &all_fds);
                         //announce the disconnection
                         printf("broadcasting the disconnection\n");
                         broadcast("Client %s disconnected\r\n");
                     }
-                    else if (obtain_result == -1){//the input is not a valid name(1. duplicate; 2. name size overflow)
+                    else if (obtain_result == -1){//the input is not a valid name(1. duplicate; 2. input exceeds the name size limit)
                         write(p->fd, "invalid name!\r\n", sizeof("invalid name!\r\n"));
                         printf("client %s entered an invalid name\n", p->name);
                     }
@@ -130,35 +128,44 @@ int main(int argc, char **argv) {
         
         //case 2: game has started, we have a current player in the game
         while (current_player != NULL && (!game_is_over())){
-            
+            //show the current game board to every player
             show_board();
+	    //prompt the current_player for move input 
+	    if (write(current_player->fd, "Your move?\r\n", sizeof("Your move?\r\n"))<0){
+                perror("while (current_player != NULL: sprintf2");
+		exit(1);
+            }
+	    //announce to the other players whose turn it is	
             char temp_buf[MAXMESSAGE];
             if (sprintf(temp_buf, "It's %s's move\r\n", current_player->name)<0){
                 perror("while (current_player != NULL: sprintf1");
+		exit(1);
             }
             announce(temp_buf);
-            if (write(current_player->fd, "Your move?\r\n", sizeof("Your move?\r\n"))<0){
-                perror("while (current_player != NULL: sprintf2");
-            }
             
-            int going_to_next_round = 0;
+            //flag is turned on when current_player has entered a valid move, or when current_player disconnected
+	    int going_to_next_round = 0;
+	    //each loop finishes when current_player entered a valid move, or when current_player disconnected	
             while (!going_to_next_round){
+		//do a select() to check for user inputs
                 listen_fds = all_fds;
-                //do a select() on listen_fds
+		    
                 int nready = select(max_fd + 1, &listen_fds, NULL, NULL, NULL);
                 if (nready == -1) {
                     perror("server: select");
                     exit(1);
                 }
                 
-                //check whether non-current players disconnected or warn non-current players in the game
+                //check if non-current players disconnected; or has entered not in their tunr, warn them in which case
                 for (struct player *p = playerlist; p; p = p->next) {
+		    //if the player has a name && has entered input
                     if( (p->hasname == 1 && FD_ISSET(p->fd, &listen_fds)) && p!=current_player){
                         int move_pit;
                         int connection_result = valid_move(p, current_player->fd, &all_fds, &move_pit);
                         if (connection_result==3){// non-current_player has disconnected
                             //broadcast the disconnection
                             printf("Client %s disconnected\n", p->name);
+				
                             char msg[MAXMESSAGE];
                             sprintf(msg, "Client %s disconnected\r\n", p->name);
                             
@@ -177,11 +184,11 @@ int main(int argc, char **argv) {
                 }
                 
                 
-                //if current_player hasn't input his move, jump to the next ieration and check again
+                //jump to the next ieration if the current_player hasn't entered inputted
                 if (!FD_ISSET(current_player->fd, &listen_fds)){continue;}
                 int move_is_valid;
                 int move_pit;
-                //determine if the user disconnected, entered a valid move, or entered an invalid move
+                //determine if the current_player disconnected, entered a valid move, or entered an invalid move
                 move_is_valid = valid_move(current_player, current_player->fd, &all_fds, &move_pit);
                 
                 
@@ -204,12 +211,12 @@ int main(int argc, char **argv) {
                     fflush(stdout);
                     break;
                 }
-                if (move_is_valid==1){//the current player entered a valid move
+                else if (move_is_valid==1){//the current player entered a valid move
                     //broadcast the move
                     char msg[MAXMESSAGE];
                     sprintf(msg, "player %s distributed pebbles in pit %d\n", current_player->name, move_pit);
                     broadcast(msg);
-                    //move the pebbles according to the current_player
+                    //distribute the pebbles according to the current_player's move
                     if (distribute_pebbles(move_pit, current_player) == 0){//no extra turn is generated
                         update_current_player(&current_player);//only this line should be different from the next case
 
@@ -218,16 +225,15 @@ int main(int argc, char **argv) {
                     else{//an extra turn for the current player, announce it here since we won't annouce it in this case otherwise
                         printf("generated extra round for the same player\n");
                     }
-                    going_to_next_round = 1;
-                    
+                    going_to_next_round = 1; 
                 }
-                else if (move_is_valid == -1){//the current player entered an invalid move
+                else if (move_is_valid == -1){//the current player has entered an invalid move
                     write(current_player->fd, "Invalid move.\r\n", sizeof("Invalid move.\r\n"));
                     printf("Current player %s entered an invalid move\n", current_player->name);
                 }
             }
             
-            //check if a new connection is ready
+            //check if a new connection is ready, only add new players after the current_player has finished his round
             if (FD_ISSET(listenfd, &listen_fds)) {
                 printf("a new connection is being accepted\n");
                 struct player *new_player = accept_connection(listenfd);
@@ -242,24 +248,18 @@ int main(int argc, char **argv) {
                 playerlist = new_player;
             }
             
-            
+            //check if unnamed players has entered input
             for (struct player *p = playerlist; p; p = p->next) {
                 //this player is unamed/not in the game && the player inputted something
                 if (p->hasname==0 &&FD_ISSET(p->fd, &listen_fds)){
                     int obtain_result = obtain_name(p); // attempt to obtain a valid name for player p
                     
                     if (obtain_result == 2){//the input is not yet complete
-                        //CHECK FOR CORNER CASE
                         printf("user entered an incomplete buffer\n");
-                        //we do nothing as next few rounds there should be enough string to complete this parsed input
                     }
                     else if (obtain_result == 1){//the input is a valid name and p's name is set accordingly
                         printf("the input is a valid name and %s's name is set accordingly\n", p->name);
                         
-                        if (current_player==NULL){
-                            current_player = p;
-                            broadcast("the input is a valid name and %s's name is set accordingly\r\n");
-                        }
                         broadcast("we have a new player!\r\n");
                         printf("new player %s has finished typing his name\n", p->name);
                     }
@@ -270,15 +270,13 @@ int main(int argc, char **argv) {
                         printf("broadcasting the disconnection\n");
                         broadcast("Client %s disconnected\r\n");
                     }
-                    else if (obtain_result == -1){//the input is not a valid name(1. duplicate; 2. name size overflow)
+                    else if (obtain_result == -1){//the input is not a valid name(1. duplicate; 2. input exceeds the name size limit)
                         write(p->fd, "invalid name!\r\n", sizeof("invalid name!\r\n"));
                         printf("client %s entered an invalid name\n", p->name);
                     }
                 }
             }
         }
-        
-  
         
         
     }
