@@ -477,6 +477,7 @@ void announce(char *s){
         if (p != current_player){
             if (write(p->fd, s, strlen(s))==-1){
                 perror("announce: write");
+		exit(1);
             }
         }
     }
@@ -566,7 +567,8 @@ int valid_move(struct player *pl, int current_fd, fd_set *all_fds, int *move_pit
     int read_result = read(pl->fd, next_move, MAXMESSAGE);
     //error checking
     if (read_result ==-1){
-        perror("read() in valid_move()");
+        perror("valid_move(): read()");
+	exit(1);
     }
     if (next_move[0]=='\n' ||next_move[0]=='\r'){
         if (pl==current_player){
